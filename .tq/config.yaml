@@ -12,4 +12,4 @@ hooks:
   commit-msg:
     commands:
       - command: ct
-        args: ["{{TQ_GIT_ARG_1}}"]
+        args: ["--edit"]
