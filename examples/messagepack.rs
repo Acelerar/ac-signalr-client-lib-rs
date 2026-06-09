@@ -1,4 +1,8 @@
-#![allow(clippy::ignored_unit_patterns, clippy::uninlined_format_args, clippy::unwrap_used)]
+#![allow(
+    clippy::ignored_unit_patterns,
+    clippy::uninlined_format_args,
+    clippy::unwrap_used
+)]
 
 use ac_signalr_client::Protocol;
 use ac_signalr_client::SignalRClient;

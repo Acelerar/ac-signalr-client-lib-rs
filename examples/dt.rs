@@ -6,9 +6,9 @@
 )]
 
 use ac_signalr_client::SignalRClient;
-use std::time::Duration;
 use serde::Deserialize;
 use serde::Serialize;
+use std::time::Duration;
 
 fn init_tracing(default_filter: &str) {
     let _ = tracing_log::LogTracer::init();

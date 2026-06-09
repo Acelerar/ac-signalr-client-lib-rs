@@ -3,6 +3,7 @@ use std::marker::Unpin;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
@@ -20,6 +21,16 @@ impl<T> State<T> {
         match value {
             None => Self::Incomplete,
             v @ Some(_) => Self::Complete(v),
+        }
+    }
+}
+
+fn lock_state<'a, T>(state: &'a Mutex<State<T>>, owner: &str) -> MutexGuard<'a, State<T>> {
+    match state.lock() {
+        Ok(state) => state,
+        Err(poisoned) => {
+            error!("{owner} state mutex poisoned");
+            poisoned.into_inner()
         }
     }
 }
@@ -43,15 +54,9 @@ impl<T: Unpin> ManualFuture<T> {
     #[allow(dead_code)]
     /// Returns `true` once the future has been completed or cancelled.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal mutex has been poisoned.
     #[must_use]
     pub fn is_completed(&self) -> bool {
-        let state = self
-            .state
-            .lock()
-            .expect("ManualFuture state mutex poisoned");
+        let state = lock_state(&self.state, "ManualFuture");
 
         match *state {
             State::Incomplete | State::Waiting(_) => false,
@@ -78,13 +83,9 @@ impl<T: Unpin> ManualFutureCompleter<T> {
     ///
     /// # Panics
     ///
-    /// Panics if the internal mutex has been poisoned or if the future has
-    /// already been completed or cancelled.
+    /// Panics if the future has already been completed or cancelled.
     pub fn complete(self, value: T) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("ManualFutureCompleter state mutex poisoned");
+        let mut state = lock_state(&self.state, "ManualFutureCompleter");
 
         match std::mem::replace(&mut *state, State::Complete(Some(value))) {
             State::Incomplete => {}
@@ -95,30 +96,18 @@ impl<T: Unpin> ManualFutureCompleter<T> {
 
     /// Cancels the paired future without producing a value.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal mutex has been poisoned.
     pub fn cancel(self) {
         warn!("Cancelling future...");
-        let mut state = self
-            .state
-            .lock()
-            .expect("ManualFutureCompleter state mutex poisoned");
+        let mut state = lock_state(&self.state, "ManualFutureCompleter");
         *state = State::Complete(None);
     }
 
     #[allow(dead_code)]
     /// Returns `true` once the paired future has been completed or cancelled.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal mutex has been poisoned.
     #[must_use]
     pub fn is_completed(&self) -> bool {
-        let state = self
-            .state
-            .lock()
-            .expect("ManualFutureCompleter state mutex poisoned");
+        let state = lock_state(&self.state, "ManualFutureCompleter");
 
         match *state {
             State::Incomplete | State::Waiting(_) => false,
@@ -139,10 +128,7 @@ impl<T: Unpin> Future for ManualFuture<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let mut state = self
-            .state
-            .lock()
-            .expect("ManualFuture state mutex poisoned");
+        let mut state = lock_state(&self.state, "ManualFuture");
 
         match &mut *state {
             State::Waiting(w) if w.will_wake(cx.waker()) => {}

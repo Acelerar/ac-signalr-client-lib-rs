@@ -4,6 +4,7 @@ use std::marker::Unpin;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use tracing::error;
 
 /// A future that is immediately ready with a precomputed value.
 pub struct CompletedFuture<T: Unpin> {
@@ -24,12 +25,12 @@ impl<T: Unpin> Future for CompletedFuture<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
-        let data = self
-            .data
-            .borrow_mut()
-            .take()
-            .expect("CompletedFuture polled after completion");
-
-        Poll::Ready(data)
+        match self.data.borrow_mut().take() {
+            Some(data) => Poll::Ready(data),
+            None => {
+                error!("CompletedFuture polled after completion");
+                Poll::Pending
+            }
+        }
     }
 }

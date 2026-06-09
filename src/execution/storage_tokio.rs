@@ -104,7 +104,13 @@ impl Storage for UpdatableActionStorage {
     }
 
     fn increment(&mut self) -> usize {
-        let mut index = self.index.lock().expect("Storage index mutex poisoned");
+        let mut index = match self.index.lock() {
+            Ok(index) => index,
+            Err(poisoned) => {
+                error!("Storage index mutex poisoned");
+                poisoned.into_inner()
+            }
+        };
 
         *index += 1;
 
