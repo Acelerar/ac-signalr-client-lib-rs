@@ -29,6 +29,21 @@
 //! See the README and the `examples/` directory for end-to-end usage patterns,
 //! including MessagePack, skip-negotiation, and reconnect configuration.
 #![warn(missing_docs, rustdoc::broken_intra_doc_links)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::doc_markdown,
+    clippy::ignored_unit_patterns,
+    clippy::implicit_clone,
+    clippy::map_unwrap_or,
+    clippy::missing_errors_doc,
+    clippy::needless_pass_by_value,
+    clippy::redundant_closure_for_method_calls,
+    clippy::single_match_else,
+    clippy::too_many_lines,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::uninlined_format_args,
+    clippy::used_underscore_binding
+)]
 
 mod client;
 mod communication;

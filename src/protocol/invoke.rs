@@ -10,8 +10,8 @@ pub struct Invocation {
     r#type: MessageType,
     #[serde(skip_serializing_if = "Option::is_none")]
     headers: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    invocation_id: Option<String>,
+    #[serde(rename = "invocationId", skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<Vec<serde_json::Value>>,
@@ -24,7 +24,7 @@ impl Invocation {
         Invocation {
             r#type: MessageType::Invocation,
             headers: None,
-            invocation_id: None,
+            id: None,
             target: target.into(),
             arguments: Some(Vec::new()),
             stream_ids: None,
@@ -35,7 +35,7 @@ impl Invocation {
         Invocation {
             r#type: MessageType::StreamInvocation,
             headers: None,
-            invocation_id: None,
+            id: None,
             target: target.into(),
             arguments: Some(Vec::new()),
             stream_ids: None,
@@ -55,8 +55,8 @@ impl Invocation {
         Ok(())
     }
 
-    pub fn with_invocation_id(&mut self, invocation_id: impl ToString) -> &mut Self {
-        self.invocation_id = Some(invocation_id.to_string());
+    pub fn with_invocation_id(&mut self, invocation_id: impl Into<String>) -> &mut Self {
+        self.id = Some(invocation_id.into());
         self
     }
 
@@ -69,7 +69,7 @@ impl Invocation {
     }
 
     pub(crate) fn get_invocation_id(&self) -> Option<String> {
-        self.invocation_id.as_ref().map(|id| id.to_string())
+        self.id.clone()
     }
 
     pub(crate) fn get_target(&self) -> String {
@@ -79,6 +79,8 @@ impl Invocation {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]
@@ -88,7 +90,7 @@ mod tests {
         assert_eq!(inv.target, "TestMethod");
         assert!(inv.arguments.is_some());
         assert_eq!(inv.arguments.as_ref().unwrap().len(), 0);
-        assert!(inv.invocation_id.is_none());
+        assert!(inv.id.is_none());
     }
 
     #[test]
@@ -107,7 +109,6 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(inv.arguments.as_ref().unwrap().len(), 1);
 
-        // Add another argument
         let result = inv.with_argument(42);
         assert!(result.is_ok());
         assert_eq!(inv.arguments.as_ref().unwrap().len(), 2);
@@ -117,7 +118,7 @@ mod tests {
     fn test_with_invocation_id() {
         let mut inv = Invocation::create_single("Test");
         inv.with_invocation_id("inv-123");
-        assert_eq!(inv.invocation_id, Some("inv-123".to_string()));
+        assert_eq!(inv.id, Some("inv-123".to_string()));
         assert_eq!(inv.get_invocation_id(), Some("inv-123".to_string()));
     }
 

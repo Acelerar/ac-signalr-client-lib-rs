@@ -1,6 +1,12 @@
-use std::time::Duration;
+#![allow(
+    clippy::ignored_unit_patterns,
+    clippy::struct_field_names,
+    clippy::uninlined_format_args,
+    clippy::unwrap_used
+)]
 
 use ac_signalr_client::SignalRClient;
+use std::time::Duration;
 use serde::Deserialize;
 use serde::Serialize;
 

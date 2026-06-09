@@ -10,16 +10,16 @@ type ActionMap = Arc<Mutex<HashMap<String, Mutex<Box<dyn UpdatableAction>>>>>;
 
 #[derive(Clone)]
 pub struct UpdatableActionStorage {
-    _data: ActionMap,
-    _index: Arc<Mutex<usize>>,
+    data: ActionMap,
+    index: Arc<Mutex<usize>>,
 }
 
 impl UpdatableActionStorage {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Self {
         UpdatableActionStorage {
-            _data: Arc::new(Mutex::new(HashMap::new())),
-            _index: Arc::new(Mutex::new(0)),
+            data: Arc::new(Mutex::new(HashMap::new())),
+            index: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -34,7 +34,7 @@ unsafe impl Send for UpdatableActionStorage {}
 
 impl Storage for UpdatableActionStorage {
     fn insert(&mut self, key: String, action: impl UpdatableAction + 'static) {
-        if let Ok(mut data) = self._data.lock() {
+        if let Ok(mut data) = self.data.lock() {
             use std::collections::hash_map::Entry;
             match data.entry(key.clone()) {
                 Entry::Vacant(e) => {
@@ -50,7 +50,7 @@ impl Storage for UpdatableActionStorage {
     }
 
     fn contains(&self, key: String) -> bool {
-        if let Ok(data) = self._data.lock() {
+        if let Ok(data) = self.data.lock() {
             data.contains_key(&key)
         } else {
             error!("Cannot lock storage");
@@ -63,10 +63,10 @@ impl Storage for UpdatableActionStorage {
         key: String,
         mut f: impl FnMut(&mut Box<dyn UpdatableAction>) -> Result<(), String>,
     ) -> Result<(), String> {
-        if let Ok(mut data) = self._data.lock() {
+        if let Ok(mut data) = self.data.lock() {
             if let Some(action) = data.get_mut(&key) {
                 if let Ok(a) = action.get_mut() {
-                    (f)(a)
+                    f(a)
                 } else {
                     Err("Cannot unlock action".to_string())
                 }
@@ -79,7 +79,7 @@ impl Storage for UpdatableActionStorage {
     }
 
     fn remove(&mut self, key: String) {
-        if let Ok(mut data) = self._data.lock() {
+        if let Ok(mut data) = self.data.lock() {
             if let Some(ret) = data.remove(&key) {
                 if let Ok(r) = ret.into_inner() {
                     drop(r);
@@ -91,11 +91,11 @@ impl Storage for UpdatableActionStorage {
     }
 
     fn dispose(&mut self) {
-        let count = Arc::strong_count(&self._data);
+        let count = Arc::strong_count(&self.data);
 
         if count == 1 {
             info!("Clearing storage...");
-            if let Ok(mut data) = self._data.lock() {
+            if let Ok(mut data) = self.data.lock() {
                 data.clear();
             } else {
                 error!("Cannot lock storage");
@@ -104,7 +104,7 @@ impl Storage for UpdatableActionStorage {
     }
 
     fn increment(&mut self) -> usize {
-        let mut index = self._index.lock().unwrap();
+        let mut index = self.index.lock().expect("Storage index mutex poisoned");
 
         *index += 1;
 
@@ -112,7 +112,7 @@ impl Storage for UpdatableActionStorage {
     }
 
     fn cancel_pending(&mut self, reason: &str) {
-        if let Ok(mut data) = self._data.lock() {
+        if let Ok(mut data) = self.data.lock() {
             let mut completed_keys = Vec::new();
 
             for (key, action) in data.iter_mut() {

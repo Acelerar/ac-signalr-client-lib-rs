@@ -41,9 +41,9 @@ pub struct HandshakeRequest {
 }
 
 impl HandshakeRequest {
-    pub fn new(protocol: impl ToString) -> Self {
+    pub fn new(protocol: impl Into<String>) -> Self {
         HandshakeRequest {
-            protocol: protocol.to_string(),
+            protocol: protocol.into(),
             version: 1,
         }
     }

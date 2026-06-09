@@ -801,10 +801,12 @@ impl CommunicationClient {
             .windows(separator_bytes.len())
             .position(|window| window == separator_bytes)
         {
-            if pos > 0 {
-                messages.push(data[..pos].to_vec());
+            let mut rest = data.split_off(pos);
+            if !data.is_empty() {
+                messages.push(std::mem::take(&mut data));
             }
-            data.drain(..pos + separator_bytes.len());
+            rest.drain(..separator_bytes.len());
+            data = rest;
         }
 
         if !data.is_empty() {
@@ -817,6 +819,8 @@ impl CommunicationClient {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]

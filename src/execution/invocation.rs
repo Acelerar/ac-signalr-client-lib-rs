@@ -64,43 +64,19 @@ impl<R: DeserializeOwned + Unpin> UpdatableAction for InvocationAction<R> {
         protocol: Protocol,
     ) -> Result<(), String> {
         match message_type {
-            MessageType::Invocation => Err(format!(
-                "Cannot complete invocation {}, with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::StreamItem => Err(format!(
-                "Cannot complete invocation {}, with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
             MessageType::Completion => {
                 let completion = MessageParser::deserialize::<Completion<R>>(message, protocol)?;
                 info!("Completion is parsed");
                 self.complete(completion.into_result());
                 Ok(())
             }
-            MessageType::StreamInvocation => Err(format!(
-                "Cannot complete invocation {}, with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::CancelInvocation => Err(format!(
-                "Cannot complete invocation {}, with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::Ping => Err(format!(
-                "Cannot complete invocation {}, with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::Close => Err(format!(
-                "Cannot complete invocation {}, with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::Other => Err(format!(
+            MessageType::Invocation
+            | MessageType::StreamItem
+            | MessageType::StreamInvocation
+            | MessageType::CancelInvocation
+            | MessageType::Ping
+            | MessageType::Close
+            | MessageType::Other => Err(format!(
                 "Cannot complete invocation {}, with message {:?}",
                 self.invocation_id,
                 String::from_utf8_lossy(message)

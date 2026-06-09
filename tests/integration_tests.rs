@@ -1,3 +1,12 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::indexing_slicing,
+    clippy::needless_pass_by_value,
+    clippy::redundant_closure_for_method_calls,
+    clippy::unwrap_used,
+    clippy::unused_async
+)]
+
 use ac_signalr_client::CallbackHandler;
 use ac_signalr_client::InvocationContext;
 use ac_signalr_client::SignalRClient;

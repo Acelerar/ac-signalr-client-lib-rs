@@ -308,6 +308,8 @@ impl HttpClient {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use crate::client::ConnectionConfiguration;
     use crate::protocol::negotiate::TransportSpec;

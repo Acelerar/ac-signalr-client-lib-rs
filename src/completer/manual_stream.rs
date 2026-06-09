@@ -22,7 +22,7 @@ impl<T> Clone for ManualStreamState<T> {
 }
 
 impl<T> ManualStreamState<T> {
-    pub fn new() -> Self {
+    fn new() -> Self {
         ManualStreamState {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             waker: Arc::new(Mutex::new(None)),
@@ -30,17 +30,27 @@ impl<T> ManualStreamState<T> {
     }
 
     fn push(&self, item: T) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock().expect("ManualStream queue mutex poisoned");
         queue.push_back(Some(item));
-        if let Some(waker) = self.waker.lock().unwrap().take() {
+        if let Some(waker) = self
+            .waker
+            .lock()
+            .expect("ManualStream waker mutex poisoned")
+            .take()
+        {
             waker.wake();
         }
     }
 
     fn close(&self) {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock().expect("ManualStream queue mutex poisoned");
         queue.push_back(None);
-        if let Some(waker) = self.waker.lock().unwrap().take() {
+        if let Some(waker) = self
+            .waker
+            .lock()
+            .expect("ManualStream waker mutex poisoned")
+            .take()
+        {
             waker.wake();
         }
     }
@@ -53,6 +63,7 @@ pub struct ManualStream<T> {
 
 impl<T> ManualStream<T> {
     /// Creates an empty stream and the completer that pushes items into it.
+    #[must_use]
     pub fn create() -> (Self, ManualStreamCompleter<T>) {
         let state = ManualStreamState::new();
 
@@ -72,11 +83,19 @@ pub struct ManualStreamCompleter<T> {
 
 impl<T> ManualStreamCompleter<T> {
     /// Queues one item for the paired stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal queue or waker mutex has been poisoned.
     pub fn push(&self, item: T) {
         self.state.push(item);
     }
 
     /// Finishes the paired stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal queue or waker mutex has been poisoned.
     pub fn close(&self) {
         self.state.close();
     }
@@ -86,14 +105,22 @@ impl<T> Stream for ManualStream<T> {
     type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut queue = self.state.queue.lock().unwrap();
+        let mut queue = self
+            .state
+            .queue
+            .lock()
+            .expect("ManualStream queue mutex poisoned");
         if let Some(item) = queue.pop_front() {
             match item {
                 Some(value) => Poll::Ready(Some(value)),
                 None => Poll::Ready(None),
             }
         } else {
-            let mut waker = self.state.waker.lock().unwrap();
+            let mut waker = self
+                .state
+                .waker
+                .lock()
+                .expect("ManualStream waker mutex poisoned");
             *waker = Some(cx.waker().clone());
             Poll::Pending
         }

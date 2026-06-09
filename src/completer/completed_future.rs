@@ -24,7 +24,11 @@ impl<T: Unpin> Future for CompletedFuture<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
-        let data = self.data.borrow_mut().take().unwrap();
+        let data = self
+            .data
+            .borrow_mut()
+            .take()
+            .expect("CompletedFuture polled after completion");
 
         Poll::Ready(data)
     }

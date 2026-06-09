@@ -51,11 +51,6 @@ impl<R: DeserializeOwned + Unpin> UpdatableAction for EnumerableAction<R> {
         protocol: Protocol,
     ) -> Result<(), String> {
         match message_type {
-            MessageType::Invocation => Err(format!(
-                "Cannot update stream {} with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
             MessageType::StreamItem => {
                 let item = MessageParser::deserialize::<StreamItem<R>>(message, protocol)?;
                 self.completer.push(item.item);
@@ -72,27 +67,12 @@ impl<R: DeserializeOwned + Unpin> UpdatableAction for EnumerableAction<R> {
                 self.completer.close();
                 Ok(())
             }
-            MessageType::StreamInvocation => Err(format!(
-                "Cannot update stream {} with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::CancelInvocation => Err(format!(
-                "Cannot update stream {} with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::Ping => Err(format!(
-                "Cannot update stream {} with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::Close => Err(format!(
-                "Cannot update stream {} with message {:?}",
-                self.invocation_id,
-                String::from_utf8_lossy(message)
-            )),
-            MessageType::Other => Err(format!(
+            MessageType::Invocation
+            | MessageType::StreamInvocation
+            | MessageType::CancelInvocation
+            | MessageType::Ping
+            | MessageType::Close
+            | MessageType::Other => Err(format!(
                 "Cannot update stream {} with message {:?}",
                 self.invocation_id,
                 String::from_utf8_lossy(message)

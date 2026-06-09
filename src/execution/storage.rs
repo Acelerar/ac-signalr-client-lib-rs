@@ -21,8 +21,8 @@ use tracing::info;
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct ManualFutureState {
-    _completer: Option<ManualFutureCompleter<bool>>,
-    _future: Option<ManualFuture<bool>>,
+    completer: Option<ManualFutureCompleter<bool>>,
+    future: Option<ManualFuture<bool>>,
 }
 
 impl ManualFutureState {
@@ -31,24 +31,22 @@ impl ManualFutureState {
         let (f, c) = ManualFuture::new();
 
         ManualFutureState {
-            _completer: Some(c),
-            _future: Some(f),
+            completer: Some(c),
+            future: Some(f),
         }
     }
 
     #[allow(dead_code)]
     pub(crate) fn complete(&mut self, value: bool) {
-        if self._completer.is_some() {
-            let completer = self._completer.take().unwrap();
-
+        if let Some(completer) = self.completer.take() {
             completer.complete(value);
         }
     }
 
     #[allow(dead_code)]
     pub(crate) async fn awaiter(&mut self) -> bool {
-        if self._future.is_some() {
-            self._future.take().unwrap().await
+        if let Some(future) = self.future.take() {
+            future.await
         } else {
             CompletedFuture::new(false).await
         }
@@ -191,21 +189,18 @@ pub(crate) struct StorageUnregistrationHandler<T>
 where
     T: Storage,
 {
-    _storage: T,
-    _key: String,
+    storage: T,
+    key: String,
 }
 
 impl<T: Storage> StorageUnregistrationHandler<T> {
     pub(crate) fn new(storage: T, key: String) -> Self {
-        StorageUnregistrationHandler {
-            _key: key,
-            _storage: storage,
-        }
+        StorageUnregistrationHandler { storage, key }
     }
 }
 
 impl<T: Storage> CallbackHandler for StorageUnregistrationHandler<T> {
     fn unregister(mut self) {
-        self._storage.remove(self._key);
+        self.storage.remove(self.key);
     }
 }

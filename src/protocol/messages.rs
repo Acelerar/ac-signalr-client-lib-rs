@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::client::Protocol;
 
-/// SignalR frame separator appended to serialized messages.
+/// `SignalR` frame separator appended to serialized messages.
 pub const RECORD_SEPARATOR: &str = "\u{001E}";
 
 pub struct MessageParser;
@@ -68,6 +68,8 @@ impl MessageParser {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::unwrap_used)]
+
     use super::*;
     use serde::Deserialize;
     use serde::Serialize;
