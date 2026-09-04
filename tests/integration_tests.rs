@@ -58,6 +58,7 @@ struct TestHubServerState {
     close_first_connection_after_handshake: bool,
     close_first_connection_after_handshake_delay: Option<Duration>,
     send_callback_after_handshake: bool,
+    setup_callbacks_sent: AtomicUsize,
     client_close_frames: AtomicUsize,
     received_targets: Mutex<Vec<String>>,
     completions: Mutex<Vec<Value>>,
@@ -80,6 +81,7 @@ impl TestHubServer {
             close_first_connection_after_handshake_delay: options
                 .close_first_connection_after_handshake_delay,
             send_callback_after_handshake: options.send_callback_after_handshake,
+            setup_callbacks_sent: AtomicUsize::new(0),
             client_close_frames: AtomicUsize::new(0),
             received_targets: Mutex::new(Vec::new()),
             completions: Mutex::new(Vec::new()),
@@ -191,6 +193,19 @@ impl TestHubServer {
         .await
         .unwrap();
     }
+
+    async fn wait_for_setup_callback_count(&self, expected: usize) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if self.state.setup_callbacks_sent.load(Ordering::SeqCst) >= expected {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
 }
 
 impl Drop for TestHubServer {
@@ -248,7 +263,7 @@ async fn handle_websocket(websocket: upgrade::UpgradeFut, state: Arc<TestHubServ
     let _ = send_json(&mut websocket, json!({})).await;
 
     if state.send_callback_after_handshake {
-        let _ = send_json(
+        if send_json(
             &mut websocket,
             json!({
                 "type": 1,
@@ -256,7 +271,11 @@ async fn handle_websocket(websocket: upgrade::UpgradeFut, state: Arc<TestHubServ
                 "arguments": ["sent-during-setup"]
             }),
         )
-        .await;
+        .await
+        .is_ok()
+        {
+            state.setup_callbacks_sent.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     if state.close_first_connection_after_handshake && connection_number == 1 {
@@ -266,7 +285,6 @@ async fn handle_websocket(websocket: upgrade::UpgradeFut, state: Arc<TestHubServ
         let _ = websocket
             .write_frame(Frame::close(1000, b"reconnect test"))
             .await;
-        return;
     }
 
     loop {
@@ -763,9 +781,7 @@ async fn test_callback_received_before_registration_is_replayed() {
     .await;
     let mut client = server.connect_client().await;
 
-    // Ensure the setup-time message has reached the reader before registering
-    // the callback. The deferred storage must retain it for replay.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    server.wait_for_setup_callback_count(1).await;
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let handler = client.register(
@@ -838,7 +854,7 @@ async fn test_reconnecting_callback_is_not_called_without_auto_reconnect() {
         async {}
     });
 
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    server.wait_for_close_frame_count(1).await;
     assert_eq!(reconnecting.load(Ordering::SeqCst), 0);
 }
 

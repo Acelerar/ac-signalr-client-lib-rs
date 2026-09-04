@@ -114,29 +114,28 @@ impl Storage for UpdatableActionStorage {
         message_type: MessageType,
         protocol: Protocol,
     ) {
-        // Hold this lock while checking the action map so registering a
-        // callback cannot race with placing a just-arrived invocation here.
+        let Ok(mut data) = self.data.lock() else {
+            error!("Cannot lock storage");
+            return;
+        };
+
+        if let Some(action_result) = data.get_mut(&key).map(|action| match action.get_mut() {
+            Ok(action) => action.update_with(&message, message_type, protocol),
+            Err(_) => Err("Cannot unlock action".to_string()),
+        }) {
+            match action_result {
+                Ok(()) => return,
+                Err(error) => {
+                    error!("Failed to dispatch deferred callback invocation: {}", error);
+                    return;
+                }
+            }
+        }
+
         let Ok(mut deferred_messages) = self.deferred_messages.lock() else {
             error!("Cannot lock deferred callback storage");
             return;
         };
-
-        let action_result = match self.data.lock() {
-            Ok(mut data) => data.get_mut(&key).map(|action| match action.get_mut() {
-                Ok(action) => action.update_with(&message, message_type, protocol),
-                Err(_) => Err("Cannot unlock action".to_string()),
-            }),
-            Err(_) => Some(Err("Cannot lock storage".to_string())),
-        };
-
-        match action_result {
-            Some(Ok(())) => return,
-            Some(Err(error)) => {
-                error!("Failed to dispatch deferred callback invocation: {}", error);
-                return;
-            }
-            None => {}
-        }
 
         let messages = deferred_messages.entry(key).or_default();
         messages.push_back((message, message_type, protocol));
