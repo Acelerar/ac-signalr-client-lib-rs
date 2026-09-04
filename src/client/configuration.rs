@@ -75,6 +75,7 @@ pub struct ConnectionConfiguration {
     _skip_negotiation: bool,
     _protocol: Protocol,
     _reconnect: ReconnectPolicy,
+    _deferred_message_capacity: usize,
 }
 
 impl ConnectionConfiguration {
@@ -88,6 +89,7 @@ impl ConnectionConfiguration {
             _skip_negotiation: false,
             _protocol: Protocol::Json,
             _reconnect: ReconnectPolicy::disabled(),
+            _deferred_message_capacity: 4096,
         }
     }
 
@@ -143,6 +145,14 @@ impl ConnectionConfiguration {
     /// Selects the SignalR protocol used for outgoing and incoming messages.
     pub fn with_protocol(&mut self, protocol: Protocol) -> &ConnectionConfiguration {
         self._protocol = protocol;
+        self
+    }
+
+    /// Sets the number of server-to-client messages retained until a callback
+    /// is registered. This covers messages sent immediately during connection
+    /// setup, before the caller can register its handlers.
+    pub fn with_deferred_message_capacity(&mut self, capacity: usize) -> &ConnectionConfiguration {
+        self._deferred_message_capacity = capacity;
         self
     }
 
@@ -216,6 +226,10 @@ impl ConnectionConfiguration {
 
     pub(crate) fn get_reconnect_policy(&self) -> ReconnectPolicy {
         self._reconnect.clone()
+    }
+
+    pub(crate) fn get_deferred_message_capacity(&self) -> usize {
+        self._deferred_message_capacity
     }
 
     fn get_http_schema(&self) -> String {
@@ -363,6 +377,19 @@ mod tests {
         assert_eq!(config.get_protocol(), Protocol::Json); // Default should be JSON
         config.with_protocol(Protocol::Json);
         assert_eq!(config.get_protocol(), Protocol::Json);
+    }
+
+    #[test]
+    fn test_deferred_message_capacity_defaults_to_4096() {
+        let config = ConnectionConfiguration::new("localhost".to_string(), "hub".to_string());
+        assert_eq!(config.get_deferred_message_capacity(), 4096);
+    }
+
+    #[test]
+    fn test_deferred_message_capacity_can_be_configured() {
+        let mut config = ConnectionConfiguration::new("localhost".to_string(), "hub".to_string());
+        config.with_deferred_message_capacity(12);
+        assert_eq!(config.get_deferred_message_capacity(), 12);
     }
 
     #[test]

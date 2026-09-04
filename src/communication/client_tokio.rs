@@ -14,6 +14,8 @@ use fastwebsockets::WebSocket;
 use http::Uri;
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
@@ -34,6 +36,9 @@ use tracing::info;
 
 const SIGNALR_PING_INTERVAL: Duration = Duration::from_secs(15);
 const GRACEFUL_CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
+
+type ReconnectCallback =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
 
 enum WriterCommand {
     Send(Vec<u8>),
@@ -301,6 +306,8 @@ struct SharedCommunicationClient {
     _events: UnboundedSender<ConnectionEvent>,
     _shutdown: AtomicBool,
     _next_generation: AtomicUsize,
+    _reconnecting_handler: Mutex<Option<ReconnectCallback>>,
+    _reconnected_handler: Mutex<Option<ReconnectCallback>>,
 }
 
 pub struct CommunicationClient {
@@ -327,13 +334,17 @@ impl Communication for CommunicationClient {
         );
 
         let (events_tx, events_rx) = unbounded_channel();
-        let actions = UpdatableActionStorage::new();
+        let actions = UpdatableActionStorage::new_with_deferred_message_capacity(
+            configuration.get_deferred_message_capacity(),
+        );
         let shared = Arc::new(SharedCommunicationClient {
             _configuration: configuration.clone(),
             _state: Mutex::new(ConnectionState::NotConnected),
             _events: events_tx,
             _shutdown: AtomicBool::new(false),
             _next_generation: AtomicUsize::new(1),
+            _reconnecting_handler: Mutex::new(None),
+            _reconnected_handler: Mutex::new(None),
         });
 
         let generation = shared._next_generation.fetch_add(1, Ordering::SeqCst);
@@ -456,6 +467,32 @@ impl Communication for CommunicationClient {
 }
 
 impl CommunicationClient {
+    pub(crate) fn set_reconnecting_handler<F, Fut>(&self, callback: F)
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let callback: ReconnectCallback = Arc::new(move || Box::pin(callback()));
+        if let Ok(mut handler) = self._shared._reconnecting_handler.lock() {
+            *handler = Some(callback);
+        } else {
+            error!("Cannot lock reconnecting callback");
+        }
+    }
+
+    pub(crate) fn set_reconnected_handler<F, Fut>(&self, callback: F)
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let callback: ReconnectCallback = Arc::new(move || Box::pin(callback()));
+        if let Ok(mut handler) = self._shared._reconnected_handler.lock() {
+            *handler = Some(callback);
+        } else {
+            error!("Cannot lock reconnected callback");
+        }
+    }
+
     fn current_connection(&self) -> Result<(usize, Arc<CommunicationConnection>), String> {
         let state = self
             ._shared
@@ -517,6 +554,15 @@ impl CommunicationClient {
 
                     if !shared._configuration.get_reconnect_policy().enabled {
                         continue;
+                    }
+
+                    let reconnecting_handler = shared
+                        ._reconnecting_handler
+                        .lock()
+                        .ok()
+                        .and_then(|handler| handler.clone());
+                    if let Some(callback) = reconnecting_handler {
+                        callback().await;
                     }
 
                     CommunicationClient::reconnect_until_connected(shared, actions.clone()).await;
@@ -600,6 +646,14 @@ impl CommunicationClient {
                                 };
                             }
                             info!("SignalR reconnect succeeded on attempt {}", attempt);
+                            let reconnected_handler = shared
+                                ._reconnected_handler
+                                .lock()
+                                .ok()
+                                .and_then(|handler| handler.clone());
+                            if let Some(callback) = reconnected_handler {
+                                callback().await;
+                            }
                             return;
                         }
                         Err(error) => {

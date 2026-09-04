@@ -1,6 +1,7 @@
 use futures::Stream;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::future::Future;
 use tracing::info;
 
 use crate::communication::Communication;
@@ -22,6 +23,21 @@ use super::InvocationContext;
 pub struct SignalRClient {
     _actions: UpdatableActionStorage,
     _connection: CommunicationClient,
+}
+
+/// Removes an invocation action if the caller stops waiting before SignalR
+/// sends a completion. This is important for callers that wrap `invoke` in a
+/// timeout: dropping the awaiter alone does not remove the action from
+/// storage.
+struct PendingInvocationCleanup {
+    actions: UpdatableActionStorage,
+    invocation_id: String,
+}
+
+impl Drop for PendingInvocationCleanup {
+    fn drop(&mut self) {
+        self.actions.remove(self.invocation_id.clone());
+    }
 }
 
 impl Drop for SignalRClient {
@@ -90,6 +106,24 @@ impl SignalRClient {
         StorageUnregistrationHandler::new(self._actions.clone(), target.clone())
     }
 
+    /// Registers an asynchronous callback that runs before an automatic reconnect.
+    pub fn on_reconnecting<F, Fut>(&mut self, callback: F)
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self._connection.set_reconnecting_handler(callback);
+    }
+
+    /// Registers an asynchronous callback that runs after an automatic reconnect.
+    pub fn on_reconnected<F, Fut>(&mut self, callback: F)
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self._connection.set_reconnected_handler(callback);
+    }
+
     /// Invokes a hub method and waits for a single completion payload.
     pub async fn invoke<T: 'static + DeserializeOwned + Unpin>(
         &mut self,
@@ -122,6 +156,10 @@ impl SignalRClient {
     {
         let invocation_id = self._actions.create_key(target.clone());
         let ret = self._actions.add_invocation::<T>(invocation_id.clone());
+        let _cleanup = PendingInvocationCleanup {
+            actions: self._actions.clone(),
+            invocation_id: invocation_id.clone(),
+        };
 
         let mut invocation = Invocation::create_single(target.clone());
         invocation.with_invocation_id(&invocation_id);
@@ -256,5 +294,27 @@ impl Clone for SignalRClient {
             _actions: self._actions.clone(),
             _connection: self._connection.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::Storage;
+
+    #[test]
+    fn pending_invocation_cleanup_removes_dropped_action() {
+        let mut actions = UpdatableActionStorage::new();
+        let _future = actions.add_invocation::<String>("invocation-id".to_string());
+        assert!(actions.contains("invocation-id".to_string()));
+
+        {
+            let _cleanup = PendingInvocationCleanup {
+                actions: actions.clone(),
+                invocation_id: "invocation-id".to_string(),
+            };
+        }
+
+        assert!(!actions.contains("invocation-id".to_string()));
     }
 }
