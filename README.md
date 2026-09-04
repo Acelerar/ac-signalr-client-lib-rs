@@ -23,6 +23,8 @@ Read more about SignalR in the [official documentation](https://learn.microsoft.
 - ✅ Authentication (Basic and Bearer)
 - ✅ Connection configuration (secure/unsecure, custom ports)
 - ✅ Opt-in automatic reconnect with configurable backoff
+- ✅ Reconnect lifecycle callbacks for state restoration
+- ✅ Bounded buffering of callbacks received before registration
 - ✅ Built with fastwebsockets for high performance
 - ✅ MessagePack protocol support for efficient binary serialization
 
@@ -172,11 +174,18 @@ async fn main() {
         c.with_unlimited_reconnect_attempts();
     }).await.unwrap();
 
+    client.on_reconnecting(|| async {
+        println!("SignalR connection lost; clear local state");
+    });
+    client.on_reconnected(|| async {
+        println!("SignalR connection restored; replay subscriptions");
+    });
+
     client.disconnect();
 }
 ```
 
-Pending invocations are completed with an error if the connection is lost before the server sends a completion, which prevents callers from waiting forever on a response that can no longer arrive.
+Pending invocations are completed with an error if the connection is lost before the server sends a completion, which prevents callers from waiting forever on a response that can no longer arrive. If an invocation future is dropped—for example, by a timeout—the corresponding pending action is also removed.
 
 ### Invoking Methods
 
@@ -252,6 +261,9 @@ async fn main() {
         }
     });
 
+    // Messages sent during connection setup, before this registration, are
+    // replayed automatically (up to the configured deferred-message limit).
+
     // ... do work ...
 
     // Unregister when done
@@ -323,6 +335,8 @@ The main client for connecting to and interacting with SignalR hubs.
 - `enumerate<T>(target)` - Get streaming results
 - `enumerate_with_args<T, F>(target, config)` - Get streaming results with arguments
 - `register(target, callback)` - Register callback for hub-to-client calls
+- `on_reconnecting(callback)` - Run an async callback before automatic reconnect
+- `on_reconnected(callback)` - Run an async callback after automatic reconnect succeeds
 - `disconnect()` - Close connection
 
 ### ConnectionConfiguration
@@ -342,6 +356,7 @@ Configure connection properties:
 - `with_reconnect_delays(initial, max)` - Configure exponential reconnect backoff
 - `with_max_reconnect_attempts(max_attempts)` - Cap reconnect attempts
 - `with_unlimited_reconnect_attempts()` - Remove the reconnect attempt cap
+- `with_deferred_message_capacity(capacity)` - Bound messages received before callback registration
 
 ### Protocol
 

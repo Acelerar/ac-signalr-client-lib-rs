@@ -63,6 +63,10 @@ impl ConnectionData {
     pub(crate) fn get_reconnect_policy(&self) -> ReconnectPolicy {
         self.source_configuration.get_reconnect_policy()
     }
+
+    pub(crate) fn get_deferred_message_capacity(&self) -> usize {
+        self.source_configuration.get_deferred_message_capacity()
+    }
 }
 
 pub trait Communication: Clone {

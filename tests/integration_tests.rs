@@ -48,12 +48,17 @@ type TestBody = BoxBody<Bytes, Infallible>;
 #[derive(Default)]
 struct TestHubServerOptions {
     close_first_connection_after_handshake: bool,
+    close_first_connection_after_handshake_delay: Option<Duration>,
+    send_callback_after_handshake: bool,
 }
 
 struct TestHubServerState {
     connections: AtomicUsize,
     negotiations: AtomicUsize,
     close_first_connection_after_handshake: bool,
+    close_first_connection_after_handshake_delay: Option<Duration>,
+    send_callback_after_handshake: bool,
+    setup_callbacks_sent: AtomicUsize,
     client_close_frames: AtomicUsize,
     received_targets: Mutex<Vec<String>>,
     completions: Mutex<Vec<Value>>,
@@ -73,6 +78,10 @@ impl TestHubServer {
             connections: AtomicUsize::new(0),
             negotiations: AtomicUsize::new(0),
             close_first_connection_after_handshake: options.close_first_connection_after_handshake,
+            close_first_connection_after_handshake_delay: options
+                .close_first_connection_after_handshake_delay,
+            send_callback_after_handshake: options.send_callback_after_handshake,
+            setup_callbacks_sent: AtomicUsize::new(0),
             client_close_frames: AtomicUsize::new(0),
             received_targets: Mutex::new(Vec::new()),
             completions: Mutex::new(Vec::new()),
@@ -184,6 +193,19 @@ impl TestHubServer {
         .await
         .unwrap();
     }
+
+    async fn wait_for_setup_callback_count(&self, expected: usize) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if self.state.setup_callbacks_sent.load(Ordering::SeqCst) >= expected {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
 }
 
 impl Drop for TestHubServer {
@@ -240,11 +262,29 @@ async fn handle_websocket(websocket: upgrade::UpgradeFut, state: Arc<TestHubServ
 
     let _ = send_json(&mut websocket, json!({})).await;
 
+    if state.send_callback_after_handshake {
+        if send_json(
+            &mut websocket,
+            json!({
+                "type": 1,
+                "target": "EarlyCallback",
+                "arguments": ["sent-during-setup"]
+            }),
+        )
+        .await
+        .is_ok()
+        {
+            state.setup_callbacks_sent.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     if state.close_first_connection_after_handshake && connection_number == 1 {
+        if let Some(delay) = state.close_first_connection_after_handshake_delay {
+            tokio::time::sleep(delay).await;
+        }
         let _ = websocket
             .write_frame(Frame::close(1000, b"reconnect test"))
             .await;
-        return;
     }
 
     loop {
@@ -721,6 +761,7 @@ async fn test_pending_invocation_returns_error_when_connection_closes() {
 async fn test_auto_reconnect_restores_connection_after_close() {
     let server = TestHubServer::start(TestHubServerOptions {
         close_first_connection_after_handshake: true,
+        ..TestHubServerOptions::default()
     })
     .await;
     let mut client = server.connect_client_with_auto_reconnect().await;
@@ -729,6 +770,92 @@ async fn test_auto_reconnect_restores_connection_after_close() {
     let result: String = client.invoke("Echo".to_string()).await.unwrap();
 
     assert_eq!(result, "echo-result");
+}
+
+#[tokio::test]
+async fn test_callback_received_before_registration_is_replayed() {
+    let server = TestHubServer::start(TestHubServerOptions {
+        send_callback_after_handshake: true,
+        ..TestHubServerOptions::default()
+    })
+    .await;
+    let mut client = server.connect_client().await;
+
+    server.wait_for_setup_callback_count(1).await;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let handler = client.register(
+        "EarlyCallback".to_string(),
+        move |ctx: InvocationContext| {
+            let message: String = ctx.argument(0).unwrap();
+            let _ = tx.send(message);
+        },
+    );
+
+    let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(message, "sent-during-setup");
+    handler.unregister();
+}
+
+#[tokio::test]
+async fn test_reconnect_lifecycle_callbacks_run() {
+    let server = TestHubServer::start(TestHubServerOptions {
+        close_first_connection_after_handshake: true,
+        close_first_connection_after_handshake_delay: Some(Duration::from_millis(100)),
+        ..TestHubServerOptions::default()
+    })
+    .await;
+    let mut client = server.connect_client_with_auto_reconnect().await;
+    let reconnecting = Arc::new(AtomicUsize::new(0));
+    let reconnected = Arc::new(AtomicUsize::new(0));
+
+    let reconnecting_count = reconnecting.clone();
+    client.on_reconnecting(move || {
+        reconnecting_count.fetch_add(1, Ordering::SeqCst);
+        async {}
+    });
+
+    let reconnected_count = reconnected.clone();
+    client.on_reconnected(move || {
+        reconnected_count.fetch_add(1, Ordering::SeqCst);
+        async {}
+    });
+
+    server.wait_for_connection_count(2).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if reconnecting.load(Ordering::SeqCst) >= 1 && reconnected.load(Ordering::SeqCst) >= 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn test_reconnecting_callback_is_not_called_without_auto_reconnect() {
+    let server = TestHubServer::start(TestHubServerOptions {
+        close_first_connection_after_handshake: true,
+        close_first_connection_after_handshake_delay: Some(Duration::from_millis(100)),
+        ..TestHubServerOptions::default()
+    })
+    .await;
+    let mut client = server.connect_client().await;
+    let reconnecting = Arc::new(AtomicUsize::new(0));
+    let reconnecting_count = reconnecting.clone();
+
+    client.on_reconnecting(move || {
+        reconnecting_count.fetch_add(1, Ordering::SeqCst);
+        async {}
+    });
+
+    server.wait_for_close_frame_count(1).await;
+    assert_eq!(reconnecting.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

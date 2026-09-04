@@ -67,6 +67,22 @@ pub trait Storage: Clone {
     fn increment(&mut self) -> usize;
     fn cancel_pending(&mut self, reason: &str);
 
+    /// Retain an invocation that arrived before its callback was registered.
+    ///
+    /// Implementations can use this to bridge the small gap between a
+    /// connection becoming active and the caller installing its callbacks.
+    fn defer_message(
+        &mut self,
+        _key: String,
+        _message: Vec<u8>,
+        _message_type: MessageType,
+        _protocol: Protocol,
+    ) {
+    }
+
+    /// Replay invocations retained for a callback after registering it.
+    fn replay_deferred(&mut self, _key: String) {}
+
     fn create_key(&mut self, target: String) -> String {
         let index = self.increment();
 
@@ -84,6 +100,7 @@ pub trait Storage: Clone {
             target.clone(),
             CallbackAction::create(target.clone(), callback, client),
         );
+        self.replay_deferred(target);
     }
 
     fn add_invocation<R: 'static + DeserializeOwned + Unpin>(
@@ -129,10 +146,13 @@ pub trait Storage: Clone {
                     String::from_utf8_lossy(message)
                 );
                 let invocation = MessageParser::deserialize::<Invocation>(message, protocol)?;
+                let target = invocation.get_target();
 
-                self.update(invocation.get_target(), |i| {
-                    i.update_with(message, message_type, protocol)
-                })?;
+                if self.contains(target.clone()) {
+                    self.update(target, |i| i.update_with(message, message_type, protocol))?;
+                } else {
+                    self.defer_message(target, message.to_vec(), message_type, protocol);
+                }
             }
             negotiate::MessageType::StreamItem => {
                 let invocation =
